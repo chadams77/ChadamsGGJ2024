@@ -86,9 +86,9 @@ public:
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1 },
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1 },
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1 },
-            { 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1 },
-            { 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
-            { 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
+            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1 },
+            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+            { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
             { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
             { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
         };
@@ -163,6 +163,7 @@ public:
     int type;
     Particle * next = NULL;
     int sbidx = -1;
+    uint32_t clr = 0;
 
     Particle() {
     }
@@ -178,12 +179,20 @@ public:
     double life;
     int idx;
     Snowball * next = NULL;
+    double groundAgo;
+    double groundFor;
+    bool jumped;
+    Sprite * eyesSpr = NULL;
 
     Snowball() {
         life = -1.;
+        groundAgo = 100.;
+        groundFor = 0.;
+        jumped = false;
+        eyesSpr = NULL;
     }
     ~Snowball() {
-
+        delete eyesSpr;
     }
 
     void updateMinMaxCenter() {
@@ -225,8 +234,8 @@ public:
             double dx = P->x - ex, dy = P->y - ey;
             double len = sqrt(dx*dx+dy*dy);
             if (len > 0) {
-                P->x -= dx * dt * 0.25;
-                P->y -= dy * dt * 0.25;
+                P->x -= dx * dt * 0.25 * 0.05;
+                P->y -= dy * dt * 0.25 * 0.05;
             }
         }
         for (int i=0; i<SB_COUNT; i++) {
@@ -247,14 +256,14 @@ public:
                 double dx = A->x - B->x, dy = A->y - B->y;
                 double len = sqrt(dx*dx+dy*dy);
                 if (len > exdist) {
-                    double F = fmin(1., (len - exdist) / exdist);
+                    double F = fmin(1., (len - exdist) / exdist) * 0.025;
                     A->x -= dx / len * dt * F;
                     A->y -= dy / len * dt * F;
                     B->x -= dx / len * dt * F;
                     B->y -= dy / len * dt * F;
                 }
                 else if (len < exdist) {
-                    double F = fmin(1., (exdist - len) / exdist);
+                    double F = fmin(1., (exdist - len) / exdist) * 0.025;
                     A->x += dx / len * dt * F;
                     A->y += dy / len * dt * F;
                     B->x -= dx / len * dt * F;
@@ -262,6 +271,31 @@ public:
                 }
             }
         }
+        if (groundAgo <= 0.001) {
+            groundFor += dt;
+            if (groundFor > 0.25 && !jumped) {
+                for (int i=0; i<SB_COUNT; i++) {
+                    Particle * P = prt[i];
+                    if (P->y < cy) {
+                        P->y -= 0.1 * dt;
+                        P->x -= 0.075 * dt;
+                    }
+                }
+                updateMinMaxCenter();
+                jumped = true;
+            }
+            else if (groundFor > .275) {
+                jumped = false;
+                groundFor = 1.;
+            }
+            groundAgo += dt;
+        }
+        else {
+            jumped = false;
+            groundFor = 0.;
+            groundAgo += dt;
+        }
+        updateMinMaxCenter();
     }
 
     bool pointInside(double x, double y) {
@@ -278,6 +312,19 @@ public:
     }
 };
 
+class SnowballDeath {
+public:
+    double cx, cy;
+    double life;
+    SnowballDeath(Snowball * S) {
+        life = 3. / 5.;
+        cx = S->cx;
+        cy = S->cy;
+    }
+};
+
+Texture bgTex, castleTex, eyesTex, eyes2Tex;
+
 class Physics {
 public:
     Particle * prt = NULL;
@@ -291,6 +338,9 @@ public:
     const int width = 320, height = 240;
     const int swidth = 32, sheight = 24;
     int newPrtIdx = 0;
+    double PRT_MASS[3] = { 1., 1., 10 };
+    vector<SnowballDeath> sda;
+
     Physics(Terrain * t = NULL) {
         terrain = t;
         prt = new Particle[MAX_PARTICLE];
@@ -392,7 +442,7 @@ public:
         while (prt[newPrtIdx].life > 0. && P->type == 2 && k-- > 0) {
             newPrtIdx = (newPrtIdx + 1) % MAX_PARTICLE;
         }
-        P->lx = P->x; P->ly = P->y;
+        P->lx = P->x - P->xv; P->ly = P->y - P->yv;
         prt[newPrtIdx] = *P;
         int idx = newPrtIdx;
         newPrtIdx = (newPrtIdx + 1) % MAX_PARTICLE;
@@ -412,6 +462,7 @@ public:
             return id;
         }
         Snowball * S = snowb + id;
+        S->eyesSpr = new Sprite(eyesTex);
         S->idx = id;
         for (int i=0; i<SB_COUNT; i++) {
             Particle P;
@@ -442,10 +493,13 @@ public:
             }
             int bpos = hx + hy * width;
             if (P->type == 1) {
-                bfr[bpos] = 0xFF0000B0;
+                bfr[bpos] = 0xFF0000BB;
             }
             else if (P->type == 2) {
                 //bfr[bpos] = 0xDFDFFFFF;
+            }
+            if (P->clr) {
+                bfr[bpos] = P->clr;
             }
         }
         for (int i=0; i<MAX_SNOWBALL; i++) {
@@ -468,7 +522,7 @@ public:
                         while (head != NULL) {
                             if (head->pointInside((double)x, (double)y)) {
                                 int bpos = x + y * width;
-                                bfr[bpos] = 0xDFDFFFFF;
+                                bfr[bpos] = head->cx < 40. ? 0xCD0000FFu : 0xFFFFDADAu;
                                 pfound = true;
                                 break;
                             }
@@ -482,20 +536,59 @@ public:
         rendered.setPosition(Vector2f(0., 0.));
         AutoTransform(rendered);
         window->draw(rendered);
+        for (int i=0; i<MAX_SNOWBALL; i++) {
+            Snowball * S = snowb + i;
+            if (S->life > 0.) {
+                if (S->cx < 40) {
+                    S->eyesSpr->setTexture(eyes2Tex);
+                }
+                else {
+                    S->eyesSpr->setTexture(eyesTex);
+                }
+                S->eyesSpr->setPosition(Vector2f(S->cx - 8., S->cy - 8.));
+                AutoTransform(S->eyesSpr);
+                window->draw(*(S->eyesSpr));        
+            }
+        }
     }
 
     void update(double dt) {
         const int cnt = width*height;
-        if ((rand()%100) < 100) {
+        if ((rand()%100) < 40) {
             Particle P;
-            P.life = 1.;
+            P.life = 15.;
             P.type = 1;
             P.x = (double)(rand() % 3200) / 10.;
             P.y = -(double)(rand() % 200) / 10.;
-            P.xv = (double(rand() % 20)) - 10.;
+            P.xv = ((double(rand() % 20)) - 10.) * dt * 0.1;
             P.yv = 0.;
+            P.clr = 0xFFFFDADAu;
             P.sbidx = -1;
             addParticle(&P);
+        }
+
+        for (int k=0; k<sda.size(); k++) {
+            SnowballDeath * S = &(sda[k]);
+            S->life -= dt;
+            if (S->life < 0.) {
+                sda.erase(sda.begin() + k);
+                k --;
+                continue;
+            }
+            for (int j=0; j<8; j++) {
+                Particle P;
+                P.type = 1;
+                P.life = 3. + (double)(rand() % 8);
+                P.life /= 3.;
+                double a = (double)(rand() % 360) / (PI * 2.);
+                double r = (double)(rand() % 290 + 10);
+                P.x = S->cx + cos(a) * r / 300. * 8.;
+                P.y = S->cy + sin(a) * r / 300. * 8.;
+                P.xv = cos(a) * r * 0.0000005;
+                P.yv = sin(a) * r * 0.0000005;
+                P.sbidx = -1;
+                addParticle(&P);
+            }
         }
 
         updateHash();
@@ -507,7 +600,8 @@ public:
 
         for (int K=0; K<substeps; K++) {
 
-            double dampf = pow(0.5, dt);
+            double dampf = exp(-dt / 0.5);
+            double dampfBlood = exp(-dt / 0.9);
 
             for (int i=0; i<MAX_SNOWBALL; i++) {
                 Snowball * S = snowb + i;
@@ -515,6 +609,29 @@ public:
                     continue;
                 }
                 S->update(dt);
+                if (S->cx < 32.) {
+                    S->life = -1.;
+                    for (int j=0; j<SB_COUNT; j++) {
+                        S->prt[j]->life = -1.;
+                    }
+                    SnowballDeath SD(S);
+                    sda.push_back(SD);
+                    for (int xo=-7; xo<=7; xo++) {
+                        for (int yo=-7; yo<=7; yo++) {
+                            int lenSq = xo*xo+yo*yo;
+                            if (lenSq < 7*7) {
+                                int sx = (int)(S->cx) + xo,
+                                    sy = (int)(S->cy + 3.) + yo;
+                                if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
+                                    int boff = sx + sy * width;
+                                    terrain->bfr[boff] = 0x00000000u;
+                                }
+                            }
+                        }
+                    }
+                    terrain->renderedTex.update((Uint8*)(terrain->bfr));
+                    updateHash();
+                }
             }
 
             for (int i=0; i<MAX_PARTICLE; i++) {
@@ -522,14 +639,45 @@ public:
                 if (P->life <= 0.) {
                     continue;
                 }
-
-                P->xv = (P->x - P->lx) * dampf;
-                P->yv = (P->y - P->ly) * dampf;
-                P->yv += 32. * dt;
-                P->x += P->xv;
-                P->y += P->yv;
+                if (P->type == 1) {
+                    P->life -= dt;
+                }
+                P->xv = (P->x - P->lx) * (P->type == 1 ? dampfBlood : dampf);
+                P->yv = (P->y - P->ly) * (P->type == 1 ? dampfBlood : dampf);
                 P->lx = P->x;
                 P->ly = P->y;
+                P->yv += 0.1 * dt;
+                P->x += P->xv;
+                P->y += P->yv;
+
+                if (P->type == 1) { // backvel/vel field
+                    double bx = P->x - P->xv,
+                           by = P->y - P->yv;
+                    double bvx = 0., bvy = 0., bvt = 0.;
+                    int hx = (int)floor(bx), hy = (int)floor(by);
+                    if (hx < 0 || hy < 0 || hx >= width || hy >= height) {
+                        continue;
+                    }
+                    int hpos = hx + hy * width;
+                    Particle * head = hash[hpos];
+                    while (head != NULL) {
+                        double dx = head->x - P->x,
+                               dy = head->y - P->y;
+                        double t = 1. - sqrt(dx*dx+dy*dy);
+                        if (t > 0.) {
+                            bvx += head->xv * t;
+                            bvy += head->yv * t;
+                            bvt += t;
+                        }
+                        head = head->next;
+                    }
+                    if (bvt > 0.) {
+                        bvx /= bvt;
+                        bvy /= bvt;
+                        P->x += bvx * 0.0001;
+                        P->y += bvy * 0.0001;
+                    }
+                }
 
                 for (int ox=-1; ox<=1; ox++) {
                     for (int oy=-1; oy<=1; oy++) {
@@ -543,6 +691,12 @@ public:
                             double dx = P->x - (floor(P->x) + 0.5 + (double)ox),
                                    dy = P->y - (floor(P->y) + 0.5 + (double)oy);
                             double lenSq = dx*dx+dy*dy;
+                            if (P->sbidx >= 0) {
+                                Snowball * S = snowb + P->sbidx;
+                                if (S->cy < P->y) {
+                                    S->groundAgo = 0.;
+                                }
+                            }
                             if (lenSq < 1.) {
                                 double len = sqrt(lenSq);
                                 if (len < 0.001) {
@@ -550,7 +704,10 @@ public:
                                 }
                                 double F = 1.;
                                 if (P->sbidx >= 0) {
-                                    F = 2.;
+                                    F = 0.25;
+                                }
+                                if (P->type == 1) {
+                                    F = 0.5;
                                 }
                                 P->x += dx / len * 0.5 * (1. - len) * F;
                                 P->y += dy / len * 0.5 * (1. - len) * F;
@@ -569,7 +726,7 @@ public:
                         Snowball * head = shash[hpos];
                         while (head != NULL) {
 
-                            if (head->idx != P->sbidx && head->pointInside(P->x, P->y)) {
+                            if (head->idx != P->sbidx && head->pointInside(P->x, P->y) && head->life >= 0.) {
                                 double dx = P->x - head->cx,
                                        dy = P->y - head->cy;
                                 double len = sqrt(dx*dx+dy*dy);
@@ -577,8 +734,12 @@ public:
                                     len = 0.001;
                                 }
                                 dx /= len; dy /= len;
-                                P->x += dx * (SB_RADIUS * 1.5 - len) * 0.1;
-                                P->y += dy * (SB_RADIUS * 1.5 - len) * 0.1;
+                                double F = 1.;
+                                if (P->type == 1) {
+                                    F = 0.2;
+                                }
+                                P->x += dx * (SB_RADIUS * 1.5 - len) * 0.02 * F;
+                                P->y += dy * (SB_RADIUS * 1.5 - len) * 0.02 * F;
                             }
 
                             head = head->next;
@@ -616,17 +777,20 @@ public:
                                         if (itA != itB && (itA->sbidx == -1 || itA->sbidx != itB->sbidx)) {
 
                                             double dx = itB->x - itA->x,
-                                                dy = itB->y - itA->y;
+                                                   dy = itB->y - itA->y;
                                             double lenSq = dx*dx+dy*dy;
                                             if (lenSq < 1.) {
                                                 double len = sqrt(lenSq);
                                                 if (len < 0.001) {
                                                     len = 0.001;
                                                 }
-                                                itA->x -= dx / len * 0.5 * 0.2 * (1. - len);
-                                                itA->y -= dy / len * 0.5 * 0.2 * (1. - len);
-                                                itB->x += dx / len * 0.5 * 0.2 * (1. - len);
-                                                itB->y += dy / len * 0.5 * 0.2 * (1. - len);
+                                                double massA = PRT_MASS[itA->type], massB = PRT_MASS[itB->type];
+                                                double tmass = massA + massB;
+                                                double F = 1. / len * 0.5 * 0.2 * (1. - len);
+                                                itA->x -= dx * F * (massB / tmass) * (itA->type == 1 ? 0.5 : 0.25);
+                                                itA->y -= dy * F * (massB / tmass) * (itA->type == 1 ? 0.5 : 0.25);
+                                                itB->x += dx * F * (massA / tmass) * (itB->type == 1 ? 0.5 : 0.25);
+                                                itB->y += dy * F * (massA / tmass) * (itB->type == 1 ? 0.5 : 0.25);
                                             }
 
                                         }
@@ -648,12 +812,11 @@ Terrain * terrain = NULL;
 
 int main() {
 
-    window = new RenderWindow(VideoMode(800, 600), "Night Of The Living Snowballs");
+    window = new RenderWindow(VideoMode(800, 600), "Night Of The Livid Snowballs");
 
     terrain = new Terrain();
     Physics physics(terrain);
 
-    Texture bgTex, castleTex;
     if (!bgTex.loadFromFile("sprites/bg.png")) {
         delete window; delete terrain;
         cerr << "Error loading bg.png" << endl;
@@ -662,6 +825,16 @@ int main() {
     if (!castleTex.loadFromFile("sprites/castle.png")) {
         delete window; delete terrain;
         cerr << "Error loading castle.png" << endl;
+        exit(0);
+    }
+    if (!eyesTex.loadFromFile("sprites/eyes.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading eyes.png" << endl;
+        exit(0);
+    }
+    if (!eyes2Tex.loadFromFile("sprites/eyes2.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading eyes2.png" << endl;
         exit(0);
     }
 
