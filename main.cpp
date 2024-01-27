@@ -66,10 +66,10 @@ public:
             damageT -= dt;
             rx = (double)(rand() % 100) / 50. - 0.5;
             ry = (double)(rand() % 100) / 50. - 0.5;
-            rx *= damageT * 5.;
-            ry *= damageT * 5.;
-            clr.g = (clr.g * (int)(255. * damageT)) / 256;
-            clr.b = (clr.b * (int)(255. * damageT)) / 256;
+            rx *= damageT * 3.;
+            ry *= damageT * 3.;
+            clr.g = (clr.g * (int)(255. - 255. * damageT)) / 256;
+            clr.b = (clr.b * (int)(255. - 255. * damageT)) / 256;
         }
         else {
             damageT = 0.;
