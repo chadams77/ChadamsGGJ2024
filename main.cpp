@@ -300,14 +300,14 @@ public:
                 double dx = A->x - B->x, dy = A->y - B->y;
                 double len = sqrt(dx*dx+dy*dy);
                 if (len > exdist) {
-                    double F = fmin(1., (len - exdist) / exdist) * 0.025;
+                    double F = fmin(1., (len - exdist) / exdist) * 0.075;
                     A->x -= dx / len * dt * F;
                     A->y -= dy / len * dt * F;
                     B->x -= dx / len * dt * F;
                     B->y -= dy / len * dt * F;
                 }
                 else if (len < exdist) {
-                    double F = fmin(1., (exdist - len) / exdist) * 0.025;
+                    double F = fmin(1., (exdist - len) / exdist) * 0.075;
                     A->x += dx / len * dt * F;
                     A->y += dy / len * dt * F;
                     B->x -= dx / len * dt * F;
@@ -587,7 +587,7 @@ public:
                 else {
                     S->eyesSpr->setTexture(eyesTex);
                 }
-                S->eyesSpr->setPosition(Vector2f(S->cx - 8., S->cy - 8.));
+                S->eyesSpr->setPosition(Vector2f(S->cx - 8. - S->prt[0]->xv * 10., S->cy - 8. - S->prt[0]->yv * 10.));
                 AutoTransform(S->eyesSpr);
                 window->draw(*(S->eyesSpr));        
             }
