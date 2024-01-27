@@ -33,3 +33,4 @@
 
 include/SFML/*
 build/*
+build/sprites/tiles.png
