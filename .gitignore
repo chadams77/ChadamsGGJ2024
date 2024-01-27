@@ -34,3 +34,4 @@
 include/SFML/*
 build/*
 build/sprites/tiles.png
+.vscode/settings.json
