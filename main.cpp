@@ -39,6 +39,50 @@ void AutoTransform ( Sprite & sprite ) {
     AutoTransform(&sprite);
 }
 
+Texture bgTex, castleTex, eyesTex, eyes2Tex;
+
+class Castle {
+public:
+    double damageT = 0.;
+    double life = 100.;
+    Sprite spr;
+    
+    Castle() {
+        spr = Sprite(castleTex);
+    }
+    ~Castle() {
+
+    }
+
+    void damage(double amt) {
+        life -= amt;
+        damageT += 1.0;
+    }
+
+    void render(double dt) {
+        double rx = 0., ry = 0.;
+        Color clr(255, 255, 255, 255);
+        if (damageT > 0.) {
+            damageT -= dt;
+            rx = (double)(rand() % 100) / 50. - 0.5;
+            ry = (double)(rand() % 100) / 50. - 0.5;
+            rx *= damageT * 5.;
+            ry *= damageT * 5.;
+            clr.g = (clr.g * (int)(255. * damageT)) / 256;
+            clr.b = (clr.b * (int)(255. * damageT)) / 256;
+        }
+        else {
+            damageT = 0.;
+        }
+        spr.setColor(clr);
+        spr.setPosition(Vector2f(16. * 1. + rx, 16. * 1. + ry));
+        AutoTransform(spr);
+        window->draw(spr);
+    }
+};
+
+Castle * castle = NULL;
+
 class Terrain {
 public:
     Texture tilesetTex;
@@ -322,8 +366,6 @@ public:
         cy = S->cy;
     }
 };
-
-Texture bgTex, castleTex, eyesTex, eyes2Tex;
 
 class Physics {
 public:
@@ -614,12 +656,13 @@ public:
                     for (int j=0; j<SB_COUNT; j++) {
                         S->prt[j]->life = -1.;
                     }
+                    castle->damage(10.);
                     SnowballDeath SD(S);
                     sda.push_back(SD);
-                    for (int xo=-7; xo<=7; xo++) {
-                        for (int yo=-7; yo<=7; yo++) {
+                    for (int xo=-9; xo<=9; xo++) {
+                        for (int yo=-9; yo<=9; yo++) {
                             int lenSq = xo*xo+yo*yo;
-                            if (lenSq < 7*7) {
+                            if (lenSq <= 9*9) {
                                 int sx = (int)(S->cx) + xo,
                                     sy = (int)(S->cy + 3.) + yo;
                                 if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
@@ -838,10 +881,10 @@ int main() {
         exit(0);
     }
 
+    castle = new Castle();
+
     Sprite bg(bgTex);
     bg.setColor(Color(192, 128, 255, 128));
-
-    Sprite castle(castleTex);
 
     window->setFramerateLimit(60);
 
@@ -870,9 +913,7 @@ int main() {
         AutoTransform(bg);
         window->draw(bg);
 
-        castle.setPosition(Vector2f(16. * 1., 16. * 1.));
-        AutoTransform(castle);
-        window->draw(castle);
+        castle->render(1. / 60.);
 
         physics.update(1. / 60.);
         physics.render(1. / 60.);
@@ -882,6 +923,7 @@ int main() {
     }
 
     delete terrain;
+    delete castle;
     delete window;
 
     return 0;
