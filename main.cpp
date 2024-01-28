@@ -6,6 +6,7 @@
 
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
 
 using namespace sf;
 using std::cerr;
@@ -1338,6 +1339,14 @@ int main() {
         cerr << "Error loading title.png" << endl;
         exit(0);
     }
+    Music music;
+    if (!music.openFromFile("sfx/music.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading music.wav" << endl;
+        exit(0);    
+    }
+    music.setLoop(true);
+    music.play();
 
     castle = new Castle();
 
@@ -1362,6 +1371,7 @@ int main() {
         Event event;
         while (window->pollEvent(event)) {
             if (event.type == Event::Closed) {
+                music.stop();
                 window->close();
             }
             else if (event.type == Event::Resized) {
