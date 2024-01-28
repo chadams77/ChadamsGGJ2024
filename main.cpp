@@ -240,9 +240,10 @@ public:
     Snowball * next = NULL;
     double groundAgo;
     double groundFor;
-    bool jumped, dying;
+    bool jumped, dying, attacking;
     double dieT;
     Sprite * eyesSpr = NULL;
+    double hpx, hpy;
 
     Snowball() {
         life = -1.;
@@ -251,6 +252,7 @@ public:
         jumped = false;
         eyesSpr = NULL;
         dying = false;
+        attacking = false;
     }
     ~Snowball() {
         delete eyesSpr;
@@ -284,6 +286,9 @@ public:
     }
 
     void update(double dt) {
+        if (0==(rand() % (60 * (attacking ? 5 : 5)))) {
+            attacking = !attacking;
+        }
         dt *= 60.;
         updateMinMaxCenter();
         double ang0 = atan2(prt[0]->y - cy, prt[0]->x - cx);
@@ -295,8 +300,8 @@ public:
             double dx = P->x - ex, dy = P->y - ey;
             double len = sqrt(dx*dx+dy*dy);
             if (len > 0) {
-                P->x -= dx * dt * 0.25 * 0.05;
-                P->y -= dy * dt * 0.25 * 0.05;
+                P->x -= dx * dt * len * len * 0.002;
+                P->y -= dy * dt * len * len * 0.002;
             }
         }
         for (int i=0; i<SB_COUNT; i++) {
@@ -317,14 +322,14 @@ public:
                 double dx = A->x - B->x, dy = A->y - B->y;
                 double len = sqrt(dx*dx+dy*dy);
                 if (len > exdist) {
-                    double F = fmin(1., (len - exdist) / exdist) * 0.075;
+                    double F = (len - exdist)*(len - exdist) * 0.002;
                     A->x -= dx / len * dt * F;
                     A->y -= dy / len * dt * F;
                     B->x -= dx / len * dt * F;
                     B->y -= dy / len * dt * F;
                 }
                 else if (len < exdist) {
-                    double F = fmin(1., (exdist - len) / exdist) * 0.075;
+                    double F = (exdist - len)*(exdist - len) * 0.002;
                     A->x += dx / len * dt * F;
                     A->y += dy / len * dt * F;
                     B->x -= dx / len * dt * F;
@@ -332,7 +337,7 @@ public:
                 }
             }
         }
-        if (groundAgo <= 0.001) {
+        if (groundAgo <= 0.001 && attacking) {
             groundFor += dt;
             if (groundFor > 0.25 && !jumped) {
                 for (int i=0; i<SB_COUNT; i++) {
@@ -432,7 +437,9 @@ public:
                 if (S->pointInside(x, y)) {
                     if (!S->dying) {
                         S->dying = true;
-                        S->dieT = 0.5;
+                        S->hpx = x - S->cx;
+                        S->hpy = y - S->cy;
+                        S->dieT = type == 1 ? 0.05 : 1.0;
                     }
                     return false;
                 }
@@ -442,7 +449,9 @@ public:
                     if (lenSq < 8.*8.) {
                         if (!S->dying) {
                             S->dying = true;
-                            S->dieT = 0.5;
+                            S->hpx = x - S->cx;
+                            S->hpy = y - S->cy;
+                            S->dieT = type == 1 ? 0.05 : 1.0;
                         }
                         return false;
                     }
@@ -893,6 +902,26 @@ public:
                 P.yv = sin(a) * r * 0.0000005;
                 P.sbidx = -1;
                 addParticle(&P);
+            }
+        }
+
+        for (int k=0; k<MAX_SNOWBALL; k++) {
+            Snowball * S = snowb + k;
+            if (S->life > 0. && S->dying) {
+                for (int j=0; j<1; j++) {
+                    Particle P;
+                    P.type = 1;
+                    P.life = 3. + (double)(rand() % 8);
+                    P.life /= 3.;
+                    double a = (double)((rand() % 20) - 10) / (PI * 2.) + atan2(S->hpy, S->hpx);
+                    double r = (double)(rand() % 150 + 150);
+                    P.x = S->cx + S->hpx;
+                    P.y = S->cy + S->hpy;
+                    P.xv = cos(a) * r * 0.000005;
+                    P.yv = sin(a) * r * 0.000005;
+                    P.sbidx = -1;
+                    addParticle(&P);
+                }
             }
         }
 
