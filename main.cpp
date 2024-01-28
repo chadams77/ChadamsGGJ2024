@@ -56,7 +56,20 @@ void InvTransform ( int sx, int sy, double & rx, double & ry ) {
 }
 
 Texture bgTex, castleTex, eyesTex, eyes2Tex, cursorTex, arrowTex, bombTex, spawnTex, numbersTex, defeatTex, titleTex;
+Music music;
+SoundBuffer arrowSfx, expSfx, getBombSfx, sbHurtSfx, sbJumpSfx, sbVoice1, sbVoice2;
 uint32_t GAME_SCORE = 0, NUM_BOMBS = 0, GAME_SCORE_TO;
+const int MAX_SOUNDS = 64;
+int soundIdx = 0;
+Sound sounds[MAX_SOUNDS];
+
+void playSound(SoundBuffer & bfr, double rate=1., double vol=1.) {
+    sounds[soundIdx].setBuffer(bfr);
+    sounds[soundIdx].setVolume(vol*100.);
+    sounds[soundIdx].setPitch(rate);
+    sounds[soundIdx].play();
+    soundIdx = (soundIdx + 1) % MAX_SOUNDS;
+}
 
 class Numbers {
 public:
@@ -130,6 +143,7 @@ public:
             if (life <= 0. && !dead) {
                 dead = true;
                 deathT = 0.;
+                playSound(expSfx, 0.3, 1.);
             }
         }
     }
@@ -140,6 +154,9 @@ public:
         if (dead) {
             damageT = 1.;
             deathT += dt;
+            if (0==(rand()%12)) {
+                playSound(expSfx, 0.5, 1.);
+            }
         }
         if (damageT > 0.) {
             damageT -= dt;
@@ -399,6 +416,9 @@ public:
     void update(double dt) {
         if (0==(rand() % (60 * (attacking ? 5 : 5)))) {
             attacking = !attacking;
+            if (0 == (rand()%10)) {
+                playSound(rand()%2 ? sbVoice1 : sbVoice2, 1., 0.5);
+            }
         }
         dt *= 60.;
         updateMinMaxCenter();
@@ -465,6 +485,7 @@ public:
                 }
                 updateMinMaxCenter();
                 jumped = true;
+                playSound(sbJumpSfx, 0.9 + 0.1 * (double)(rand()%10), 0.125);
             }
             else if (groundFor > .275) {
                 jumped = false;
@@ -547,6 +568,8 @@ public:
             if (S->life > 0.) {
                 if (S->pointInside(x, y)) {
                     if (!S->dying) {
+                        playSound(sbHurtSfx, 1., 0.75);
+                        playSound(rand()%2 ? sbVoice1 : sbVoice2, 0.65, 0.75);
                         S->dying = true;
                         S->hpx = x - S->cx;
                         S->hpy = y - S->cy;
@@ -557,6 +580,9 @@ public:
                             if (NUM_BOMBS > 99) {
                                 NUM_BOMBS = 99;
                             }
+                            else {
+                                playSound(getBombSfx, 1.0, 0.5);
+                            }
                         }
                     }
                     return false;
@@ -566,6 +592,8 @@ public:
                     double lenSq = dx*dx+dy*dy;
                     if (lenSq < 8.*8.) {
                         if (!S->dying) {
+                            playSound(sbHurtSfx, 1., 0.75);
+                            playSound(rand()%2 ? sbVoice1 : sbVoice2, 0.65, 0.75);
                             S->dying = true;
                             S->hpx = x - S->cx;
                             S->hpy = y - S->cy;
@@ -740,6 +768,12 @@ public:
         if (id < 0) {
             return id;
         }
+        if (rand()%2) {
+            playSound(sbVoice1, 1., 0.75);
+        }
+        else {
+            playSound(sbVoice2, 1., 0.75);
+        }
         Snowball * S = snowb + id;
         S->dying = false;
         S->eyesSpr = new Sprite(eyesTex);
@@ -855,6 +889,7 @@ public:
                 P->xv = vx; P->yv = vy;
                 P->t = 0.;
                 proj.push_back(P);
+                playSound(arrowSfx, 1., 1.);
             }
             else if (!mouseRight && lastMouseRight && speed > 1.1) {
                 Projectile * P = new Projectile(1);
@@ -863,6 +898,7 @@ public:
                 P->t = 0.;
                 proj.push_back(P);
                 NUM_BOMBS -= 1;
+                playSound(arrowSfx, 0.5, 1.);
             }
             else {
                 const double dampF = exp(-dt * 1./0.95);
@@ -918,6 +954,7 @@ public:
                     exClr2 = exClr1 = 0xFFFFDADAu;
                     exCnt = 8;
                     exPwr = 1.;
+                    playSound(expSfx, 3.0, 0.45);
                 }
                 else if (proj[i]->type == 1)  {
                     texr = 18;
@@ -926,6 +963,7 @@ public:
                     exClr2 = 0xFF008FFFu;
                     exCnt = 128;
                     exPwr = 1.;
+                    playSound(expSfx, 1.0, 0.75);
                 }
                 for (int xo=-texr; xo<=texr; xo++) {
                     for (int yo=-texr; yo<=texr; yo++) {
@@ -942,6 +980,8 @@ public:
                                                 S->dying = true;
                                                 S->dieT = proj[i]->type == 0 ? 0.5 : 0.05;
                                                 GAME_SCORE_TO += (int)(proj[i]->t * 10) * ((int)proj[i]->t*10);
+                                                playSound(sbHurtSfx, 1., 0.75);
+                                                playSound(rand()%2 ? sbVoice1 : sbVoice2, 0.65, 0.75);
                                             }
                                         }
                                     }
@@ -1075,8 +1115,11 @@ public:
                     for (int j=0; j<SB_COUNT; j++) {
                         S->prt[j]->life = -1.;
                     }
+                    playSound(expSfx, 1.5, 0.75);
                     if (!S->dying) {
                         castle->damage(10.);
+                        playSound(sbHurtSfx, 0.5, 0.75);
+                        playSound(rand()%2 ? sbVoice1 : sbVoice2, 1.25, 1.);
                     }
                     SnowballDeath SD(S);
                     sda.push_back(SD);
@@ -1339,13 +1382,54 @@ int main() {
         cerr << "Error loading title.png" << endl;
         exit(0);
     }
-    Music music;
     if (!music.openFromFile("sfx/music.wav")) {
         delete window; delete terrain;
         cerr << "Error loading music.wav" << endl;
         exit(0);    
     }
+    if (!arrowSfx.loadFromFile("sfx/arrow-shoot.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading arrow-shoot.wav" << endl;
+        exit(0);    
+    }
+    if (!expSfx.loadFromFile("sfx/exp.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading exp.wav" << endl;
+        exit(0);    
+    }
+    if (!getBombSfx.loadFromFile("sfx/get-bomb.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading get-bomb.wav" << endl;
+        exit(0);    
+    }
+    if (!sbHurtSfx.loadFromFile("sfx/sb-hurt.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading sb-hurt.wav" << endl;
+        exit(0);    
+    }
+    if (!sbJumpSfx.loadFromFile("sfx/sb-jump.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading sb-jump.wav" << endl;
+        exit(0);    
+    }
+    if (!sbHurtSfx.loadFromFile("sfx/sb-hurt.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading sb-hurt.wav" << endl;
+        exit(0);    
+    }
+    if (!sbVoice1.loadFromFile("sfx/sb-voice.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading sb-voice.wav" << endl;
+        exit(0);    
+    }
+    if (!sbVoice2.loadFromFile("sfx/sb-voice-2.wav")) {
+        delete window; delete terrain;
+        cerr << "Error loading sb-voice-2.wav" << endl;
+        exit(0);    
+    }
+
     music.setLoop(true);
+    music.setVolume(75.);
     music.play();
 
     castle = new Castle();
@@ -1389,14 +1473,18 @@ int main() {
                     VP_HEIGHT = window->getSize().y;
 	                window->setView(View(FloatRect(0.f, 0.f, (float)VP_WIDTH, (float)VP_HEIGHT)));
                 }
-                else {
+                else if (!started) {
                     started = true;
+                    playSound(getBombSfx, 0.5, 0.5);
                 }
             }
         }
 
         if ((!Mouse::isButtonPressed(Mouse::Left) && lMouseLeft) || (!Mouse::isButtonPressed(Mouse::Right) && lMouseRight)) {
-            started = true;
+            if (!started) {
+                started = true;
+                playSound(getBombSfx, 0.5, 0.5);
+            }
         }
         lMouseLeft = Mouse::isButtonPressed(Mouse::Left);
         lMouseRight = Mouse::isButtonPressed(Mouse::Right);
@@ -1437,7 +1525,7 @@ int main() {
             spawnTime -= dt;
             if (spawnTime < 0.) {
                 physics.addSnowball(275., 75.);
-                spawnTime = (double)(rand()%8 + 2);
+                spawnTime = (double)(rand()%7 + 1);
             }
             AutoTransform(spawn);
             window->draw(spawn);
