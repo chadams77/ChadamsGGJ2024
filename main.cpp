@@ -54,7 +54,7 @@ void InvTransform ( int sx, int sy, double & rx, double & ry ) {
     ry += 240. * 0.5;
 }
 
-Texture bgTex, castleTex, eyesTex, eyes2Tex, cursorTex, arrowTex, bombTex;
+Texture bgTex, castleTex, eyesTex, eyes2Tex, cursorTex, arrowTex, bombTex, spawnTex;
 
 class Castle {
 public:
@@ -240,7 +240,8 @@ public:
     Snowball * next = NULL;
     double groundAgo;
     double groundFor;
-    bool jumped;
+    bool jumped, dying;
+    double dieT;
     Sprite * eyesSpr = NULL;
 
     Snowball() {
@@ -249,6 +250,7 @@ public:
         groundFor = 0.;
         jumped = false;
         eyesSpr = NULL;
+        dying = false;
     }
     ~Snowball() {
         delete eyesSpr;
@@ -337,7 +339,12 @@ public:
                     Particle * P = prt[i];
                     if (P->y < cy) {
                         P->y -= 0.1 * dt;
-                        P->x -= 0.075 * dt;
+                        if (!dying) {
+                            P->x -= 0.075 * dt;
+                        }
+                        else {
+                            P->y -= 0.1 * dt;
+                        }
                     }
                 }
                 updateMinMaxCenter();
@@ -402,7 +409,7 @@ public:
     }
     ~Projectile() {}
 
-    bool updateRender(double dt, Terrain * terrain) {
+    bool updateRender(double dt, Terrain * terrain, Snowball * snowb) {
         t += dt;
 
         const double dampF = exp(-dt * 1./0.95);
@@ -418,6 +425,29 @@ public:
         }
         else {
             return false;
+        }
+        for (int i=0; i<MAX_SNOWBALL; i++) {
+            Snowball * S = snowb + i;
+            if (S->life > 0.) {
+                if (S->pointInside(x, y)) {
+                    if (!S->dying) {
+                        S->dying = true;
+                        S->dieT = 0.5;
+                    }
+                    return false;
+                }
+                if (type == 1) {
+                    double dx = x - S->cx, dy = y - S->cy;
+                    double lenSq = dx*dx+dy*dy;
+                    if (lenSq < 8.*8.) {
+                        if (!S->dying) {
+                            S->dying = true;
+                            S->dieT = 0.5;
+                        }
+                        return false;
+                    }
+                }
+            }
         }
         spr.setOrigin(8., 8.);
         spr.setPosition(x, y);
@@ -583,6 +613,7 @@ public:
             return id;
         }
         Snowball * S = snowb + id;
+        S->dying = false;
         S->eyesSpr = new Sprite(eyesTex);
         S->idx = id;
         for (int i=0; i<SB_COUNT; i++) {
@@ -643,7 +674,7 @@ public:
                         while (head != NULL) {
                             if (head->pointInside((double)x, (double)y)) {
                                 int bpos = x + y * width;
-                                bfr[bpos] = head->cx < 40. ? 0xCD0000FFu : 0xFFFFDADAu;
+                                bfr[bpos] = (head->dying || head->cx < 40.) ? 0xCD0000FFu : 0xFFFFDADAu;
                                 pfound = true;
                                 break;
                             }
@@ -703,7 +734,7 @@ public:
             }
             else {
                 const double dampF = exp(-dt * 1./0.95);
-                for (int i=0; i<600; i++) {
+                for (int i=0; i<60; i++) {
                     vx *= dampF; vy *= dampF;
                     vy += 0.1 * dt * 16.;
                     x += vx; y += vy;
@@ -733,7 +764,7 @@ public:
         for (int i=0; i<MAX_SNOWBALL; i++) {
             Snowball * S = snowb + i;
             if (S->life > 0.) {
-                if (S->cx < 40) {
+                if (S->cx < 40 || S->dying) {
                     S->eyesSpr->setTexture(eyes2Tex);
                 }
                 else {
@@ -745,19 +776,20 @@ public:
             }
         }
         for (int i=0; i<proj.size(); i++) {
-            if (!proj[i]->updateRender(dt, terrain)) {
-                int texr;
+            if (!proj[i]->updateRender(dt, terrain, snowb)) {
+                int texr, texrt;
                 uint32_t exClr1, exClr2;
                 int exCnt;
                 double exPwr;
                 if (proj[i]->type == 0) {
-                    texr = 1;
+                    texr = texrt = 1;
                     exClr2 = exClr1 = 0xFFFFDADAu;
                     exCnt = 8;
                     exPwr = 1.;
                 }
                 else if (proj[i]->type == 1)  {
-                    texr = 4;
+                    texr = 12;
+                    texrt = 4;
                     exClr1 = 0xFF00FFFFu;
                     exClr2 = 0xFF008FFFu;
                     exCnt = 128;
@@ -770,19 +802,32 @@ public:
                             int sx = (int)(proj[i]->x) + xo,
                                 sy = (int)(proj[i]->y) + yo;
                             if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
-                                int boff = sx + sy * width;
-                                if (sy >= (height-24)) {
-                                    uint32_t tmp = terrain->bfr[boff];
-                                    uint8_t r = tmp & 0xFFu;
-                                    uint8_t g = (tmp >> 8u) & 0xFFu;
-                                    uint8_t b = (tmp >> 16u) & 0xFFu;
-                                    r /= 2;
-                                    g /= 2;
-                                    b /= 2;
-                                    terrain->bfr[boff] = (tmp & 0xFF000000u) | (b << 16u) | (g << 8u) | r;
+                                for (int j=0; j<MAX_SNOWBALL; j++) {
+                                    Snowball * S = snowb + j;
+                                    if (S->life > 0.) {
+                                        if (S->pointInside((double)sx, (double)sy)) {
+                                            if (!S->dying) {
+                                                S->dying = true;
+                                                S->dieT = 0.5;
+                                            }
+                                        }
+                                    }
                                 }
-                                else {
-                                    terrain->bfr[boff] = 0x00000000u;
+                                if (lenSq <= texrt*texrt) {
+                                    int boff = sx + sy * width;
+                                    if (sy >= (height-24)) {
+                                        uint32_t tmp = terrain->bfr[boff];
+                                        uint8_t r = tmp & 0xFFu;
+                                        uint8_t g = (tmp >> 8u) & 0xFFu;
+                                        uint8_t b = (tmp >> 16u) & 0xFFu;
+                                        r /= 2;
+                                        g /= 2;
+                                        b /= 2;
+                                        terrain->bfr[boff] = (tmp & 0xFF000000u) | (b << 16u) | (g << 8u) | r;
+                                    }
+                                    else {
+                                        terrain->bfr[boff] = 0x00000000u;
+                                    }
                                 }
                             }
                         }
@@ -868,13 +913,18 @@ public:
                 if (S->life <= 0.) {
                     continue;
                 }
+                if (S->dying) {
+                    S->dieT -= dt;
+                }
                 S->update(dt);
-                if (S->cx < 32.) {
+                if (S->cx < 32. || (S->dying && S->dieT <= 0.)) {
                     S->life = -1.;
                     for (int j=0; j<SB_COUNT; j++) {
                         S->prt[j]->life = -1.;
                     }
-                    castle->damage(10.);
+                    if (!S->dying) {
+                        castle->damage(10.);
+                    }
                     SnowballDeath SD(S);
                     sda.push_back(SD);
                     for (int xo=-9; xo<=9; xo++) {
@@ -882,7 +932,7 @@ public:
                             int lenSq = xo*xo+yo*yo;
                             if (lenSq <= 9*9) {
                                 int sx = (int)(S->cx) + xo,
-                                    sy = (int)(S->cy + 3.) + yo;
+                                    sy = (int)(S->cy + (S->dying ? 0. : 3.)) + yo;
                                 if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
                                     int boff = sx + sy * width;
                                     terrain->bfr[boff] = 0x00000000u;
@@ -1114,6 +1164,11 @@ int main() {
         cerr << "Error loading cursor.png" << endl;
         exit(0);
     }
+    if (!spawnTex.loadFromFile("sprites/spawn.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading spawn.png" << endl;
+        exit(0);
+    }
 
     castle = new Castle();
 
@@ -1121,14 +1176,14 @@ int main() {
     bg.setColor(Color(192, 128, 255, 128));
 
     Sprite cursor(cursorTex);
+    Sprite spawn(spawnTex);
 
-    window->setFramerateLimit(60);
+    spawn.setOrigin(16., 16.);
 
-    physics.addSnowball(145., 50.);
-    physics.addSnowball(155., 60.);
-    physics.addSnowball(170., 70.);
-    physics.addSnowball(185., 80.);
-    physics.addSnowball(200., 90.);
+    window->setFramerateLimit(60);    
+
+    double time = 0.;
+    double spawnTime = 0.;
     
     while (window->isOpen()) {
         Event event;
@@ -1153,11 +1208,25 @@ int main() {
         AutoTransform(bg);
         window->draw(bg);
 
-        castle->render(1. / 60.);
+        double dt = 1. / 60.;
+        time += dt;
 
-        physics.update(1. / 60.);
-        physics.render(1. / 60., mouseX, mouseY, Mouse::isButtonPressed(Mouse::Left), Mouse::isButtonPressed(Mouse::Right));
-        terrain->render(1. / 60.);
+        castle->render(dt);
+
+        spawn.setPosition(275., 75.);
+        int rid = (int)(time * 8.) % 4;
+        spawn.setTextureRect(IntRect(rid * 32, 0, 32, 32));
+        spawnTime -= dt;
+        if (spawnTime < 0.) {
+            physics.addSnowball(275., 75.);
+            spawnTime = (double)(rand()%8 + 2);
+        }
+        AutoTransform(spawn);
+        window->draw(spawn);
+
+        physics.update(dt);
+        physics.render(dt, mouseX, mouseY, Mouse::isButtonPressed(Mouse::Left), Mouse::isButtonPressed(Mouse::Right));
+        terrain->render(dt);
 
         cursor.setPosition(mouseX-8., mouseY-8.);
         AutoTransform(cursor);
