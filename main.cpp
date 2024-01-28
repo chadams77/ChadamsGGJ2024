@@ -54,29 +54,92 @@ void InvTransform ( int sx, int sy, double & rx, double & ry ) {
     ry += 240. * 0.5;
 }
 
-Texture bgTex, castleTex, eyesTex, eyes2Tex, cursorTex, arrowTex, bombTex, spawnTex;
+Texture bgTex, castleTex, eyesTex, eyes2Tex, cursorTex, arrowTex, bombTex, spawnTex, numbersTex, defeatTex, titleTex;
+uint32_t GAME_SCORE = 0, NUM_BOMBS = 0, GAME_SCORE_TO;
+
+class Numbers {
+public:
+    Sprite * sprites;
+    int size;
+
+    Numbers(int sz) {
+        size = sz;
+        sprites = new Sprite[size+1];
+        for (int i=0; i<(size+1); i++) {
+            sprites[i].setTexture(numbersTex);
+        }
+    }
+
+    ~Numbers() {
+        delete sprites;
+    }
+
+    void draw(double x, double y, uint32_t value, Color clr = Color::Black, int icon=0) {
+        sprites[size].setTextureRect(IntRect((icon+10)*8, 0, 8, 8));
+        sprites[size].setPosition(x, y);
+        //sprites[size].setColor(clr);
+        AutoTransform(sprites[size]);
+        window->draw(sprites[size]);
+
+        uint32_t p = 1;
+        for (int i=0; i<size; i++) {
+            p *= 10;
+        }
+
+        for (int i=size-1; i>=0; i--) {
+            x += 8.;
+            p /= 10;
+            int digit = (value / p) % 10;
+            sprites[i].setTextureRect(IntRect(digit*8, 0, 8, 8));
+            sprites[i].setPosition(x, y);
+            sprites[i].setColor(clr);
+            AutoTransform(sprites[i]);
+            window->draw(sprites[i]);
+        }
+    }
+};
 
 class Castle {
 public:
     double damageT = 0.;
+    double displayLife = 0.;
     double life = 100.;
+    bool dead;
+    double deathT;
     Sprite spr;
+    Sprite hud1, hud2, hud3, def;
     
     Castle() {
         spr = Sprite(castleTex);
+        hud1 = Sprite(numbersTex);
+        hud2 = Sprite(numbersTex);
+        hud3 = Sprite(numbersTex);
+        def = Sprite(defeatTex);
+        dead = false;
+        deathT = 0.;
     }
     ~Castle() {
 
     }
 
     void damage(double amt) {
-        life -= amt;
-        damageT += 1.0;
+        if (life > 0.) {
+            life -= amt * 1.0001;
+            damageT += 1.0;
+            if (life <= 0. && !dead) {
+                dead = true;
+                deathT = 0.;
+            }
+        }
     }
 
     void render(double dt) {
         double rx = 0., ry = 0.;
         Color clr(255, 255, 255, 255);
+        if (dead) {
+            damageT = 1.;
+            deathT += dt;
+        }
         if (damageT > 0.) {
             damageT -= dt;
             rx = (double)(rand() % 100) / 50. - 0.5;
@@ -90,9 +153,53 @@ public:
             damageT = 0.;
         }
         spr.setColor(clr);
-        spr.setPosition(Vector2f(16. * 1. + rx, 16. * 1. + ry));
+        spr.setPosition(Vector2f(16. * 1. + rx, 16. * 1. + ry + deathT * 24.));
         AutoTransform(spr);
         window->draw(spr);
+    }
+
+    bool renderHud(double dt) {
+        displayLife += (fmax(0., fmin(100., life)) - displayLife) * dt * 8.;
+
+        hud1.setTextureRect(IntRect(12*8, 0, 8, 8));
+        hud1.setPosition(4., 4.);
+        AutoTransform(hud1);
+        window->draw(hud1);
+
+        hud2.setTextureRect(IntRect(13*8, 0, 80, 8));
+        hud2.setPosition(4. + 8., 4.);
+        AutoTransform(hud2);
+        window->draw(hud2);
+
+        hud3.setTextureRect(IntRect(13*8 + 80, 0, (int)(80. * displayLife / 100.), 8));
+        hud3.setPosition(4. + 8., 4.);
+        AutoTransform(hud3);
+        window->draw(hud3);
+
+        if (dead && deathT > 5.) {
+            int alpha = (int)(16. * fmin(1., (deathT - 5.) / 1.5)) * 16;
+            if (alpha > 255) {
+                alpha = 255;
+            }
+            int shade = 255;
+            if (deathT > 9.) {
+                shade = 255 - (int)((deathT - 9.) * 256.);
+                if (shade < 0) {
+                    shade = 0;
+                }
+                shade /= 16;
+                shade *= 16;
+            }
+            def.setPosition(0., 0.);
+            def.setColor(Color((uint8_t)shade, (uint8_t)shade, (uint8_t)shade, (uint8_t)alpha));
+            AutoTransform(def);
+            window->draw(def);
+            if (deathT > 10.) {
+                return true;
+            }
+        }
+
+        return false;
     }
 };
 
@@ -133,6 +240,9 @@ public:
         memset(bfr, 0, sizeof(uint32_t)*width*height);
 
         const int TW = 20, TH = 15;
+
+        GAME_SCORE = GAME_SCORE_TO = 0;
+        NUM_BOMBS = 3;
 
         int tileMap[TH][TW] = {
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -428,7 +538,7 @@ public:
                 return false;
             }
         }
-        else {
+        else if (ix < 0 || ix >= width || iy >= height) {
             return false;
         }
         for (int i=0; i<MAX_SNOWBALL; i++) {
@@ -440,6 +550,13 @@ public:
                         S->hpx = x - S->cx;
                         S->hpy = y - S->cy;
                         S->dieT = type == 1 ? 0.05 : 1.0;
+                        GAME_SCORE_TO += (int)(t*10) * (int)(t*10);
+                        if (type == 0 && 0==(rand()%8)) {
+                            NUM_BOMBS += 1;
+                            if (NUM_BOMBS > 99) {
+                                NUM_BOMBS = 99;
+                            }
+                        }
                     }
                     return false;
                 }
@@ -452,6 +569,7 @@ public:
                             S->hpx = x - S->cx;
                             S->hpy = y - S->cy;
                             S->dieT = type == 1 ? 0.05 : 1.0;
+                            GAME_SCORE_TO += (int)(t*10) * (int)(t*10);
                         }
                         return false;
                     }
@@ -693,7 +811,10 @@ public:
                 }
             }
         }
-        if ((mouseLeft || lastMouseLeft) || (mouseRight || lastMouseRight)) {
+        if (NUM_BOMBS == 0) {
+            mouseRight = false;
+        }
+        if (((mouseLeft || lastMouseLeft) || (mouseRight || lastMouseRight)) && !castle->dead) {
             double startX, startY;
             double speed = 1.;
             if (mouseLeft || lastMouseLeft) {
@@ -740,6 +861,7 @@ public:
                 P->xv = vx; P->yv = vy;
                 P->t = 0.;
                 proj.push_back(P);
+                NUM_BOMBS -= 1;
             }
             else {
                 const double dampF = exp(-dt * 1./0.95);
@@ -797,8 +919,8 @@ public:
                     exPwr = 1.;
                 }
                 else if (proj[i]->type == 1)  {
-                    texr = 12;
-                    texrt = 4;
+                    texr = 18;
+                    texrt = 5;
                     exClr1 = 0xFF00FFFFu;
                     exClr2 = 0xFF008FFFu;
                     exCnt = 128;
@@ -817,7 +939,8 @@ public:
                                         if (S->pointInside((double)sx, (double)sy)) {
                                             if (!S->dying) {
                                                 S->dying = true;
-                                                S->dieT = 0.5;
+                                                S->dieT = proj[i]->type == 0 ? 0.5 : 0.05;
+                                                GAME_SCORE_TO += (int)(proj[i]->t * 10) * ((int)proj[i]->t*10);
                                             }
                                         }
                                     }
@@ -1152,6 +1275,8 @@ Terrain * terrain = NULL;
 
 int main() {
 
+    bool fullscreen = false;
+
     window = new RenderWindow(VideoMode(800, 600), "Night Of The Livid Snowballs");
     window->setMouseCursorVisible(false);
 
@@ -1198,14 +1323,30 @@ int main() {
         cerr << "Error loading spawn.png" << endl;
         exit(0);
     }
+    if (!numbersTex.loadFromFile("sprites/numbers.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading numbers.png" << endl;
+        exit(0);
+    }
+    if (!defeatTex.loadFromFile("sprites/defeat.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading defeat.png" << endl;
+        exit(0);
+    }
+    if (!titleTex.loadFromFile("sprites/title.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading title.png" << endl;
+        exit(0);
+    }
 
     castle = new Castle();
 
     Sprite bg(bgTex);
-    bg.setColor(Color(192, 128, 255, 128));
-
     Sprite cursor(cursorTex);
     Sprite spawn(spawnTex);
+    Sprite title(titleTex);
+    Numbers scoreNumbers(7);
+    Numbers bombNumbers(2);
 
     spawn.setOrigin(16., 16.);
 
@@ -1213,6 +1354,9 @@ int main() {
 
     double time = 0.;
     double spawnTime = 0.;
+    double startTime = 0.;
+    bool started = false;
+    bool lMouseLeft = false, lMouseRight = false;
     
     while (window->isOpen()) {
         Event event;
@@ -1225,7 +1369,27 @@ int main() {
                 VP_HEIGHT = window->getSize().y;
 	            window->setView(View(FloatRect(0.f, 0.f, (float)VP_WIDTH, (float)VP_HEIGHT)));
             }
+            else if (event.type == Event::KeyReleased) {
+                if (event.key.code == Keyboard::Key::F11) {
+                    fullscreen = !fullscreen;
+                    delete window;
+                    window = new RenderWindow(fullscreen ? VideoMode::getDesktopMode() : VideoMode(800, 600), "Night Of The Livid Snowballs", fullscreen ? Style::Fullscreen : Style::Default);
+                    window->setFramerateLimit(60);
+                    VP_WIDTH = window->getSize().x;
+                    VP_HEIGHT = window->getSize().y;
+	                window->setView(View(FloatRect(0.f, 0.f, (float)VP_WIDTH, (float)VP_HEIGHT)));
+                }
+                else {
+                    started = true;
+                }
+            }
         }
+
+        if ((!Mouse::isButtonPressed(Mouse::Left) && lMouseLeft) || (!Mouse::isButtonPressed(Mouse::Right) && lMouseRight)) {
+            started = true;
+        }
+        lMouseLeft = Mouse::isButtonPressed(Mouse::Left);
+        lMouseRight = Mouse::isButtonPressed(Mouse::Right);
 
         Vector2i mousePosI = Mouse::getPosition(*window);
         double mouseX, mouseY;
@@ -1233,29 +1397,75 @@ int main() {
 
         window->clear(Color::Black);
 
+        int shade = (int)(255. * startTime);
+        shade /= 16;
+        shade *= 16;
+
+        int bgshade = shade;
+        if (started) {
+            bgshade = 255;
+        }
+
+        bg.setColor(Color(bgshade*3/4, bgshade/2, bgshade, 128));
         bg.setPosition(Vector2f(0., 0.));
         AutoTransform(bg);
         window->draw(bg);
 
         double dt = 1. / 60.;
-        time += dt;
+        if (started) {
+            time += dt;
+            startTime -= dt;
+            if (startTime < 0.) {
+                startTime = 0.;
+            }
 
-        castle->render(dt);
+            castle->render(dt);
 
-        spawn.setPosition(275., 75.);
-        int rid = (int)(time * 8.) % 4;
-        spawn.setTextureRect(IntRect(rid * 32, 0, 32, 32));
-        spawnTime -= dt;
-        if (spawnTime < 0.) {
-            physics.addSnowball(275., 75.);
-            spawnTime = (double)(rand()%8 + 2);
+            spawn.setPosition(275., 75.);
+            int rid = (int)(time * 8.) % 4;
+            spawn.setTextureRect(IntRect(rid * 32, 0, 32, 32));
+            spawnTime -= dt;
+            if (spawnTime < 0.) {
+                physics.addSnowball(275., 75.);
+                spawnTime = (double)(rand()%8 + 2);
+            }
+            AutoTransform(spawn);
+            window->draw(spawn);
+
+            physics.update(dt);
+            physics.render(dt, mouseX, mouseY, Mouse::isButtonPressed(Mouse::Left), Mouse::isButtonPressed(Mouse::Right));
+            terrain->render(dt);
+
+            if (GAME_SCORE != GAME_SCORE_TO) {
+                uint32_t inc = (GAME_SCORE_TO - GAME_SCORE) / 16;
+                if (!inc) {
+                    inc = (GAME_SCORE_TO - GAME_SCORE);
+                }
+                GAME_SCORE += inc;
+            }
+
+            scoreNumbers.draw(320. - 4. - 8. * 8., 4., GAME_SCORE, Color(255, 255, 127), 1);
+            bombNumbers.draw(320. - 4. - 8. * 8. - 5. * 8., 4., NUM_BOMBS, Color(255, 32, 32), 0);
+            if (castle->renderHud(dt)) { // death
+                terrain->resetLevel();
+                physics.clear();
+                delete castle;
+                castle = new Castle();
+                time = 0.;
+                started = false;
+            }
         }
-        AutoTransform(spawn);
-        window->draw(spawn);
+        else {
+            startTime += dt;
+            if (startTime > 1.) {
+                startTime = 1.;
+            }
+        }
 
-        physics.update(dt);
-        physics.render(dt, mouseX, mouseY, Mouse::isButtonPressed(Mouse::Left), Mouse::isButtonPressed(Mouse::Right));
-        terrain->render(dt);
+        title.setColor(Color(shade, shade, shade, shade));
+        title.setPosition(Vector2f(0., 0.));
+        AutoTransform(title);
+        window->draw(title);
 
         cursor.setPosition(mouseX-8., mouseY-8.);
         AutoTransform(cursor);
