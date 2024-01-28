@@ -39,7 +39,22 @@ void AutoTransform ( Sprite & sprite ) {
     AutoTransform(&sprite);
 }
 
-Texture bgTex, castleTex, eyesTex, eyes2Tex;
+void InvTransform ( int sx, int sy, double & rx, double & ry ) {
+    double aspectA = (double)VP_WIDTH / (double)VP_HEIGHT;
+    double aspect = 320. / 240.;
+    double scale = aspectA < aspect ? ((double)VP_WIDTH / 320.) : ((double)VP_HEIGHT / 240.);
+        
+    rx = (double)sx;
+    ry = (double)sy;
+    rx -= (double)VP_WIDTH * 0.5;
+    ry -= (double)VP_HEIGHT * 0.5;
+    rx /= scale;
+    ry /= scale;
+    rx += 320. * 0.5;
+    ry += 240. * 0.5;
+}
+
+Texture bgTex, castleTex, eyesTex, eyes2Tex, cursorTex, arrowTex, bombTex;
 
 class Castle {
 public:
@@ -194,7 +209,7 @@ public:
     }
 };
 
-const int MAX_PARTICLE = 16384;
+const int MAX_PARTICLE = 4096;
 const int MAX_SNOWBALL = 256;
 const int SB_COUNT = 16;
 const double SB_RADIUS = 6.;
@@ -367,6 +382,62 @@ public:
     }
 };
 
+class Projectile {
+public:
+    double x, y;
+    double xv, yv;
+    int type;
+    double t=0.;
+    Sprite spr;
+    const int width = 320, height = 240;
+
+    Projectile(int _type=0) {
+        type = _type;
+        if (type==0) {
+            spr.setTexture(arrowTex);
+        }
+        else {
+            spr.setTexture(bombTex);
+        }
+    }
+    ~Projectile() {}
+
+    bool updateRender(double dt, Terrain * terrain) {
+        t += dt;
+
+        const double dampF = exp(-dt * 1./0.95);
+        xv *= dampF; yv *= dampF;
+        yv += 0.1 * dt * 16.;
+        x += xv; y += yv;
+        int ix = (int)floor(x), iy = (int)floor(y);
+        if (ix >= 0 && iy >= 0 && ix < width && iy < height) {
+            int bpos = ix + iy * width;
+            if (((terrain->bfr[bpos] >> 24u) & 0xFFu) > 0) {
+                return false;
+            }
+        }
+        else {
+            return false;
+        }
+        spr.setOrigin(8., 8.);
+        spr.setPosition(x, y);
+        if (type == 0) {
+            spr.setRotation(atan2(yv, xv)/PI*180.);
+            spr.setColor(Color(0xFFFFFFFFu));
+        }
+        else if (type == 1) {
+            double st = sin(t * PI * 8.) * 0.5 + 0.5;
+            Color clr(255, 255, 255, 255);
+            clr.g = (clr.g * (int)(255. * st)) / 256;
+            clr.b = (clr.b * (int)(255. * st)) / 256;
+            spr.setColor(clr);
+        }
+        AutoTransform(spr);
+        window->draw(spr);
+        return true;
+    }
+};
+
 class Physics {
 public:
     Particle * prt = NULL;
@@ -381,7 +452,10 @@ public:
     const int swidth = 32, sheight = 24;
     int newPrtIdx = 0;
     double PRT_MASS[3] = { 1., 1., 10 };
+    double arrowSpeed = 1., bombSpeed = 1.;
+    bool lastMouseLeft = false, lastMouseRight = false;
     vector<SnowballDeath> sda;
+    vector<Projectile*> proj;
 
     Physics(Terrain * t = NULL) {
         terrain = t;
@@ -416,6 +490,11 @@ public:
         for (int i=0; i<(swidth*sheight); i++) {
             shash[i] = NULL;
         }
+        for (int i=0; i<proj.size(); i++) {
+            delete proj[i];
+        }
+        proj.clear();
+        sda.clear();
     }
 
     void updateHash() {
@@ -522,7 +601,7 @@ public:
         S->update(1. / 60.);
     }
 
-    void render(double dt) {
+    void render(double dt, double mouseX, double mouseY, bool mouseLeft, bool mouseRight) {
         memset(bfr, 0, width*height*sizeof(uint32_t));
         for (int i=0; i<MAX_PARTICLE; i++) {
             Particle * P = prt + i;
@@ -574,6 +653,79 @@ public:
                 }
             }
         }
+        if ((mouseLeft || lastMouseLeft) || (mouseRight || lastMouseRight)) {
+            double startX, startY;
+            double speed = 1.;
+            if (mouseLeft || lastMouseLeft) {
+                startX = 15.;
+                startY = 30.;
+                if (mouseLeft) {
+                    arrowSpeed += dt * 2.;
+                    if (arrowSpeed > 8.) {
+                        arrowSpeed = 1.;
+                    }
+                }
+                speed = arrowSpeed;
+            }
+            else {
+                startX = 15.;
+                startY = 110.;
+                if (mouseRight) {
+                    bombSpeed += dt;
+                    if (bombSpeed > 5.) {
+                        bombSpeed = 1.;
+                    }
+                }
+                speed = bombSpeed;
+            }
+            startX += 16.; startY += 16.;
+            double x = startX, y = startY;
+            double dx = mouseX - startX, dy = mouseY - startY;
+            double len = sqrt(dx*dx+dy*dy);
+            if (len < 1.) {
+                len = 1.;
+            }
+            dx /= len; dy /= len;
+            double vx = dx * speed, vy = dy * speed;
+            if (!mouseLeft && lastMouseLeft && speed > 1.1) {
+                Projectile * P = new Projectile(0);
+                P->x = x; P->y = y;
+                P->xv = vx; P->yv = vy;
+                P->t = 0.;
+                proj.push_back(P);
+            }
+            else if (!mouseRight && lastMouseRight && speed > 1.1) {
+                Projectile * P = new Projectile(1);
+                P->x = x; P->y = y;
+                P->xv = vx; P->yv = vy;
+                P->t = 0.;
+                proj.push_back(P);
+            }
+            else {
+                const double dampF = exp(-dt * 1./0.95);
+                for (int i=0; i<600; i++) {
+                    vx *= dampF; vy *= dampF;
+                    vy += 0.1 * dt * 16.;
+                    x += vx; y += vy;
+                    int ix = (int)floor(x), iy = (int)floor(y);
+                    if (ix >= 0 && iy >= 0 && ix < width && iy < height) {
+                        int bpos = ix + iy * width;
+                        bfr[bpos] = speed > 1.1 ? 0xA00000FF : 0xA000008F;
+                        if (((terrain->bfr[bpos] >> 24u) & 0xFFu) > 0) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!mouseLeft) {
+            arrowSpeed = 10.;
+        }
+        if (!mouseRight) {
+            bombSpeed = 10.;
+        }
+        lastMouseLeft = mouseLeft;
+        lastMouseRight = mouseRight;
         renderedTex.update((Uint8*)bfr);
         rendered.setPosition(Vector2f(0., 0.));
         AutoTransform(rendered);
@@ -590,6 +742,72 @@ public:
                 S->eyesSpr->setPosition(Vector2f(S->cx - 8. - S->prt[0]->xv * 10., S->cy - 8. - S->prt[0]->yv * 10.));
                 AutoTransform(S->eyesSpr);
                 window->draw(*(S->eyesSpr));        
+            }
+        }
+        for (int i=0; i<proj.size(); i++) {
+            if (!proj[i]->updateRender(dt, terrain)) {
+                int texr;
+                uint32_t exClr1, exClr2;
+                int exCnt;
+                double exPwr;
+                if (proj[i]->type == 0) {
+                    texr = 1;
+                    exClr2 = exClr1 = 0xFFFFDADAu;
+                    exCnt = 8;
+                    exPwr = 1.;
+                }
+                else if (proj[i]->type == 1)  {
+                    texr = 4;
+                    exClr1 = 0xFF00FFFFu;
+                    exClr2 = 0xFF008FFFu;
+                    exCnt = 128;
+                    exPwr = 1.;
+                }
+                for (int xo=-texr; xo<=texr; xo++) {
+                    for (int yo=-texr; yo<=texr; yo++) {
+                        int lenSq = xo*xo+yo*yo;
+                        if (lenSq <= texr*texr) {
+                            int sx = (int)(proj[i]->x) + xo,
+                                sy = (int)(proj[i]->y) + yo;
+                            if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
+                                int boff = sx + sy * width;
+                                if (sy >= (height-24)) {
+                                    uint32_t tmp = terrain->bfr[boff];
+                                    uint8_t r = tmp & 0xFFu;
+                                    uint8_t g = (tmp >> 8u) & 0xFFu;
+                                    uint8_t b = (tmp >> 16u) & 0xFFu;
+                                    r /= 2;
+                                    g /= 2;
+                                    b /= 2;
+                                    terrain->bfr[boff] = (tmp & 0xFF000000u) | (b << 16u) | (g << 8u) | r;
+                                }
+                                else {
+                                    terrain->bfr[boff] = 0x00000000u;
+                                }
+                            }
+                        }
+                    }
+                }
+                terrain->renderedTex.update((Uint8*)(terrain->bfr));
+                for (int j=0; j<exCnt; j++) {
+                    Particle P;
+                    P.type = 1;
+                    P.life = 3. + (double)(rand() % 8);
+                    P.life /= 3.;
+                    double a = (double)(rand() % 360) / (PI * 2.);
+                    double r = (double)(rand() % 290 + 10);
+                    P.x = (proj[i]->x + cos(a) * r / 300. * 8.) * exPwr;
+                    P.y = (proj[i]->y + sin(a) * r / 300. * 8.) * exPwr;
+                    P.clr = rand()%2 ? exClr1 : exClr2;
+                    P.xv = cos(a) * r * 0.0000005;
+                    P.yv = sin(a) * r * 0.0000005;
+                    P.sbidx = -1;
+                    addParticle(&P);
+                }
+                delete proj[i];
+                proj.erase(proj.begin() + i);
+                i --;
+                continue;
             }
         }
     }
@@ -856,6 +1074,7 @@ Terrain * terrain = NULL;
 int main() {
 
     window = new RenderWindow(VideoMode(800, 600), "Night Of The Livid Snowballs");
+    window->setMouseCursorVisible(false);
 
     terrain = new Terrain();
     Physics physics(terrain);
@@ -880,11 +1099,28 @@ int main() {
         cerr << "Error loading eyes2.png" << endl;
         exit(0);
     }
+    if (!bombTex.loadFromFile("sprites/bomb.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading bomb.png" << endl;
+        exit(0);
+    }
+    if (!arrowTex.loadFromFile("sprites/arrow.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading arrow.png" << endl;
+        exit(0);
+    }
+    if (!cursorTex.loadFromFile("sprites/cursor.png")) {
+        delete window; delete terrain;
+        cerr << "Error loading cursor.png" << endl;
+        exit(0);
+    }
 
     castle = new Castle();
 
     Sprite bg(bgTex);
     bg.setColor(Color(192, 128, 255, 128));
+
+    Sprite cursor(cursorTex);
 
     window->setFramerateLimit(60);
 
@@ -907,6 +1143,10 @@ int main() {
             }
         }
 
+        Vector2i mousePosI = Mouse::getPosition(*window);
+        double mouseX, mouseY;
+        InvTransform(mousePosI.x, mousePosI.y, mouseX, mouseY);
+
         window->clear(Color::Black);
 
         bg.setPosition(Vector2f(0., 0.));
@@ -916,8 +1156,12 @@ int main() {
         castle->render(1. / 60.);
 
         physics.update(1. / 60.);
-        physics.render(1. / 60.);
+        physics.render(1. / 60., mouseX, mouseY, Mouse::isButtonPressed(Mouse::Left), Mouse::isButtonPressed(Mouse::Right));
         terrain->render(1. / 60.);
+
+        cursor.setPosition(mouseX-8., mouseY-8.);
+        AutoTransform(cursor);
+        window->draw(cursor);
 
         window->display();
     }
