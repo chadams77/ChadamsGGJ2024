@@ -642,6 +642,7 @@ public:
     bool lastMouseLeft = false, lastMouseRight = false;
     vector<SnowballDeath> sda;
     vector<Projectile*> proj;
+    double arrowCooldown = 0., bombCooldown = 0.;
 
     Physics(Terrain * t = NULL) {
         terrain = t;
@@ -849,6 +850,8 @@ public:
         if (NUM_BOMBS == 0) {
             mouseRight = false;
         }
+        arrowCooldown -= dt;
+        bombCooldown -= dt;
         if (((mouseLeft || lastMouseLeft) || (mouseRight || lastMouseRight)) && !castle->dead) {
             double startX, startY;
             double speed = 1.;
@@ -883,15 +886,16 @@ public:
             }
             dx /= len; dy /= len;
             double vx = dx * speed, vy = dy * speed;
-            if (!mouseLeft && lastMouseLeft && speed > 1.1) {
+            if (!mouseLeft && lastMouseLeft && speed > 1.1 && arrowCooldown <= 0.) {
                 Projectile * P = new Projectile(0);
                 P->x = x; P->y = y;
                 P->xv = vx; P->yv = vy;
                 P->t = 0.;
                 proj.push_back(P);
                 playSound(arrowSfx, 1., 1.);
+                arrowCooldown = 1.0;
             }
-            else if (!mouseRight && lastMouseRight && speed > 1.1) {
+            else if (!mouseRight && lastMouseRight && speed > 1.1 && bombCooldown <= 0.) {
                 Projectile * P = new Projectile(1);
                 P->x = x; P->y = y;
                 P->xv = vx; P->yv = vy;
@@ -899,6 +903,7 @@ public:
                 proj.push_back(P);
                 NUM_BOMBS -= 1;
                 playSound(arrowSfx, 0.5, 1.);
+                bombCooldown = 1.0;
             }
             else {
                 const double dampF = exp(-dt * 1./0.95);
